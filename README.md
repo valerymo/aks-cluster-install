@@ -4,7 +4,7 @@
    
    deploy_aks_cluster.py 
 
-Application could be used to install Azure AKS Cluster from any Linux clint machine.
+Application could be used to install Azure AKS Cluster from any Linux client machine.
 It installing All required prerequsites on client machine:
 - Azure CLI
 - AKS-Angine
