@@ -1,28 +1,17 @@
 #!/usr/bin/python
 
-# version: 0.1.0
-# date: 13.10.20
+# version: 0.2.0
+# date: 21.10.20
 # developed by: Valery Mogilevsky
 # description: Script for AKS (Kubernetes) Cluster deployment
-# Required input parameters:
-#           1. Azure SubscriptionId
-#           2. Number of Cluster nodes
+# Required input parameters: -f input.json - json file with parameters definitions
+# Usage example: $./deploy_aks_cluster.py  -f input.json
 
 import argparse
+import json
 import logging
-import re
-import sys
-import os
 import subprocess
-
-
-
-AZURE_STORAGE = "cloud-shell-storage1-westeurope" # move to cmd input params
-AZURE_LOCATION = "westeurope" # move to cmd input params
-NAMESPACE = "test1" # move to cmd input params
-MAX_NODES_PER_CLUSTER = 100
-INGRESS_CONTROLLER_REPLICACOUNT = 2
-API_MODEL_KUBERNETES_JSON_FILE_NAME = "kubernetes.json"
+import time
 
 ERROR_RED = "\033[1;31;40m" + "ERROR:" + "\033[0m"
 INFO_RED = "\033[1;31;40m" + "INFO:" + "\033[0m"
@@ -32,47 +21,74 @@ INFO_BLUE = "\033[1;34;40m" + "INFO:" + "\033[0m"
 logging.basicConfig(level=logging.INFO)  # for debugging use level=logging.DEBUG
 #logging.basicConfig(level=logging.DEBUG)
 
-
 def main():
     logging.debug("main")
     try:
         parser = argparse.ArgumentParser(description='This Script deploying Azure AKS (Kubernetes) Cluster')
-        parser.add_argument(
-            'subscription', type=str, help='Azure SubscriptionId')
-        parser.add_argument(
-            'nodesnum', type=int, help="Number of Kubernetes Cluster Nodes")
+        parser.add_argument("--file", "-f", type=str, required=True, help='Json file with input parameters')
         args = parser.parse_args()
+        input_file = args.file
 
-        inputproc = InputProcessor(args)
-        clientvalidator = ClientEnvironmentValidator(args)
-        clusterinst = AKSClusterInstaller(args)
-        # clustertest = ClusrerValidator()
-        # ingresinst = IngresInstaller()
-        # microsvcinst = TestMicroservicesInstaller()
-
-        if not inputproc.check_cluster_nodes_number():
+        with open(input_file) as json_file:
+            input_params = json.load(json_file)
+        if not validate_params(input_params):
+            logging.info("ERROR in Input parameters validation")
+            return
+        input_processor = InputProcessor(input_params)
+        if not input_processor.check_cluster_nodes_number():
+            logging.info("ERROR in InputProcessor")
+            return
+        client_environment_validator = ClientEnvironmentValidator(input_params)
+        if not client_environment_validator.validate_client_environment():
+            logging.info("ERROR in Client Environment Validation")
             return
 
-        if not clientvalidator.validate_client_environment():
-            logging.info("ERROR in Client Environment Validatation")
-            return
-
-        clusterinst.install_cluster()
-
+        aks_cluster_installer = AKSClusterInstaller(input_params)
+        aks_cluster_installer.install_cluster()
         logging.debug("\033[1;32;40m" + "Completed:" + "\033[0m")
-
 
     except AssertionError:
         print("ERROR: function main - Unexpected error")
 
+def validate_params(input_params):
+    if ((not input_params.get('AZURE_SUBSCRIPTION_ID'))
+        or (not input_params.get('NUMBER_OF_KUBERNETES_CLUSTER_NODES'))
+        or (not input_params.get('NAMESPACE'))
+        or (not input_params.get('AZURE_STORAGE'))
+        or (not input_params.get('AZURE_LOCATION'))
+        or (not input_params.get('MAX_NODES_PER_CLUSTER'))
+        or (not input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT'))
+        or (not input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME'))
+        or (not input_params.get('APP_DEPLOY_YAML_FILES_FOR_TEST'))
+        or (not input_params.get('AZURE_STORAGE'))
+        or (not input_params.get('AZURE_LOCATION'))):
+        print ("Missing mandatory parameter in input file")
+        print ("Expected json input file structure sample: ")
+        print ("{\n" +
+            "  \"AZURE_SUBSCRIPTION_ID\": \"xxxxxx\",\n" +
+            "  \"NUMBER_OF_KUBERNETES_CLUSTER_NODES\": \"1\",\n" +
+            "  \"NAMESPACE\": \"test1\",\n" +
+            "  \"AZURE_STORAGE\": \"cloud-shell-storage1-westeurope\",\n" +
+            "  \"AZURE_LOCATION\": \"westeurope\",\n"+
+            "  \"MAX_NODES_PER_CLUSTER\": \"100\",\n"+
+            "  \"INGRESS_CONTROLLER_REPLICA_COUNT\": \"2\",\n"+
+            "  \"API_MODEL_KUBERNETES_JSON_FILE_NAME\": \"kubernetes.json\",\n"+
+            "  \"APP_DEPLOY_YAML_FILES_FOR_TEST\": [\n"+
+            "    {\"service-a\": \"service-a.yaml\"},\n"+
+            "    {\"service-b\": \"service-b.yaml\"}]\n"+
+       "}\n")
+        return False
+    else:
+        return True
+
 
 class ClientPrerequisites:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class PrerequisitesInstaller")
-        self.args = args
-        self.aks_inst = AzureAKSEngineInstaller(self.args)
-        self.cli = AzureCLIInstaller(self.args)
-        self.helm = HelmInstaller(self.args)
+        self.input_params = input_params
+        self.aks_inst = AzureAKSEngineInstaller(self.input_params)
+        self.cli = AzureCLIInstaller(self.input_params)
+        self.helm = HelmInstaller(self.input_params)
 
     def check_client_prerequisites(self):
         logging.debug("PrerequisitesInstaller.check_client_prerequisites:")
@@ -100,16 +116,17 @@ class ClientPrerequisites:
 
 
 class AzureCLIInstaller:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class AzureCLIInstaller")
-        self.args = args
+        self.input_params = input_params
 
     def install_azure_cli(self):
         logging.debug("AzureCLIInstaller.install_azure_cli:")
         try:
             command = "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
             logging.debug("Installing Azure CLI:" + command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            azure_subscription_id = self.input_params.get('AZURE_SUBSCRIPTION_ID')
+            proc = subprocess.Popen([command, azure_subscription_id], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
         except AssertionError:
@@ -117,9 +134,10 @@ class AzureCLIInstaller:
 
 
 class AzureAKSEngineInstaller:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class AzureAKSEngineInstaller")
-        self.args = args
+        self.input_params = input_params
+        self.azure_subscription_id = self.input_params.get('AZURE_SUBSCRIPTION_ID')
 
     def install_aks_engine(self):
         logging.debug("AzureAKSEngineInstaller.install_aks_engine:")
@@ -132,19 +150,19 @@ class AzureAKSEngineInstaller:
             # 1
             command = "curl -o get-akse.sh https://raw.githubusercontent.com/Azure/aks-engine/master/scripts/get-akse.sh"
             logging.debug("Get get-akse.sh :" + command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen([command, self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
             #2
             command = "chmod 700 get-akse.sh"
             logging.debug("chmod 700 get-akse.sh :" + command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen([command, self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
             #3
             command = "./get-akse.sh"
             logging.debug("./get-akse.sh :" + command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen([command, self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
         except AssertionError:
@@ -152,10 +170,11 @@ class AzureAKSEngineInstaller:
 
 
 class ClientEnvironmentValidator:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class ClientEnvironmentValidator")
-        self.args = args
-        self.pre = ClientPrerequisites(self.args)
+        self.input_params = input_params
+        self.pre = ClientPrerequisites(self.input_params)
+        self.azure_subscription_id = self.input_params.get('AZURE_SUBSCRIPTION_ID')
 
     def validate_client_environment(self):
         logging.debug("ClientEnvironmentValidator.validate_client_environment:")
@@ -179,7 +198,7 @@ class ClientEnvironmentValidator:
         
     def check_if_azure_cli_installed(self):
         logging.debug("ClientEnvironmentValidator.check_if_azure_cli_installed:")
-        proc = subprocess.Popen(["which az", self.args.subscription], stdout=subprocess.PIPE, shell=True)
+        proc = subprocess.Popen(["which az", self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
         (out, err) = proc.communicate()
         #logging.debug("which az:" + str(out))
         if not "az" in str(out):
@@ -194,7 +213,7 @@ class ClientEnvironmentValidator:
 
     def check_if_aks_engine_installed(self):
         logging.debug("ClientEnvironmentValidator.check_if_aks_engine_installed:")
-        proc = subprocess.Popen(["which aks-engine", self.args.subscription], stdout=subprocess.PIPE, shell=True)
+        proc = subprocess.Popen(["which aks-engine", self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
         (out, err) = proc.communicate()
         #logging.debug("which aks-engine:" + str(out))
         if not "aks-engine" in str(out):
@@ -209,7 +228,7 @@ class ClientEnvironmentValidator:
 
     def check_if_helm3_installed(self):
         logging.debug("ClientEnvironmentValidator.check_if_helm3_installed:")
-        proc = subprocess.Popen(["helm version", self.args.subscription], stdout=subprocess.PIPE, shell=True)
+        proc = subprocess.Popen(["helm version", self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
         (out, err) = proc.communicate()
         if not "Version:\"v3" in str(out):
             print(INFO_BLUE + "Helm3 is not installed on Client.")
@@ -222,18 +241,19 @@ class ClientEnvironmentValidator:
         return True
 
 
-
-
 class InputProcessor:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class InputProcessor")
-        self.args = args
+        self.input_params = input_params
+        self.azure_subscription_id = self.input_params.get('AZURE_SUBSCRIPTION_ID')
+        self.nodesnum = self.input_params.get('NUMBER_OF_KUBERNETES_CLUSTER_NODES')
+        self.max_nodes_per_cluster = self.input_params.get('MAX_NODES_PER_CLUSTER')
 
     def check_cluster_nodes_number(self):
         logging.debug("InputProcessor.get_cluster_nodes_number")
         try:
-            if self.args.nodesnum < 1 or self.args.nodesnum > MAX_NODES_PER_CLUSTER:
-                print ("ERROR: Not valid number of Cluster nodes. Shoulld be in range from 1 to " + str(MAX_NODES_PER_CLUSTER))
+            if int(self.nodesnum) < 1 or int(self.nodesnum) > int(self.max_nodes_per_cluster):
+                print ("ERROR: Not valid number of Cluster nodes. Shoulld be in range from 1 to " + str(self.max_nodes_per_cluster))
                 return False
             return True
         except AssertionError:
@@ -242,7 +262,7 @@ class InputProcessor:
     def check_subscription(self):
         logging.debug("InputProcessor.check_subscription")
         try:
-            proc = subprocess.Popen(["az account list -o table |grep ", args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen(["az account list -o table |grep ", self.azure_subscription_id], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print ("az account list -- output:", str(out))
             if not out.find("AzureCloud"):
@@ -254,11 +274,18 @@ class InputProcessor:
 
 
 class AKSClusterInstaller:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class AKSClusterInstaller")
-        self.args = args
-        self.ingress = IngressInstaller(self.args)
-        self.utils = Utils(self.args)
+        self.input_params = input_params
+        self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
+        self.azure_storage = self.input_params.get('AZURE_STORAGE')
+        self.azure_location = self.input_params.get('AZURE_LOCATION')
+        self.kubernetes_json_file_name = self.input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME')
+        self.namespace = self.input_params.get('NAMESPACE')
+
+        self.ingress = IngressInstaller(self.input_params)
+        self.apps = AppsInstaller(self.input_params)
+        self.utils = Utils(self.input_params)
         self.appid = ""
         self.password = ""
 
@@ -267,25 +294,26 @@ class AKSClusterInstaller:
         logging.debug("Installing Cluster ...")
         self.create_group()
         self.create_role("Contributor")
+        self.azure_account_list_refresh_and_wait()
         self.deploy_cluster()
         self.set_kubeconfig()
         self.create_namespace()
         self.install_ingress()
+        self.install_apps()
 
     def create_group(self):
         logging.debug("AKSClusterInstaller.create_group")
-        command = "az group create --name " + AZURE_STORAGE + " --location " + AZURE_LOCATION
+        command = "az group create --name " + self.azure_storage + " --location " + self.azure_location
         logging.debug("command:" + command)
         self.utils.run_command(command, "AKSClusterInstaller.create_group")
-
 
     def create_role(self, role):
         logging.debug("AKSClusterInstaller.create_role")
         #command = az ad sp create-for-rbac --role="Contributor" --scopes="/subscriptions/803fbfe1-411b-4055-aed5-a02de15bde2b/resourceGroups/cloud-shell-storage-westeurope"
-        command = "az ad sp create-for-rbac --role=\"" + role + "\" --scopes=\"/subscriptions/" + self.args.subscription + "/resourceGroups/"+ AZURE_STORAGE +"\""
+        command = "az ad sp create-for-rbac --role=\"" + role + "\" --scopes=\"/subscriptions/" + self.azure_subscription + "/resourceGroups/" + self.azure_storage + "\""
         try:
             logging.debug(command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen([command, self.azure_subscription], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
             list = str(out).split("\"")
@@ -299,11 +327,11 @@ class AKSClusterInstaller:
     def deploy_cluster(self):
         logging.debug("AKSClusterInstaller.deploy_cluster")
         #command = aks-engine deploy --subscription-id 803fbfe1-411b-4055-aed5-a02de15bde2b     --dns-prefix cloud-shell-storage-westeurope     --resource-group cloud-shell-storage-westeurope     --location westeurope     --api-model kubernetes.json     --client-id 630c39b3-70ff-476f-a699-195b9591ff8d     --client-secret 8ZsTAh7.aueCNRN_v5Gr7r8RNdlZWzoTZB     --set servicePrincipalProfile.clientId="630c39b3-70ff-476f-a699-195b9591ff8d"     --set servicePrincipalProfile.secret="630c39b3-70ff-476f-a699-195b9591ff8d"
-        command = "aks-engine deploy --subscription-id " + self.args.subscription \
-                + " --dns-prefix " + AZURE_STORAGE \
-                + " --resource-group " + AZURE_STORAGE \
-                + " --location " +  AZURE_LOCATION  \
-                + " --api-model " + API_MODEL_KUBERNETES_JSON_FILE_NAME \
+        command = "aks-engine deploy --subscription-id " + self.azure_subscription \
+                + " --dns-prefix " + self.azure_storage \
+                + " --resource-group " + self.azure_storage \
+                + " --location " +  self.azure_location  \
+                + " --api-model " + self.kubernetes_json_file_name \
                 + " --client-id " + self.appid \
                 + " --client-secret " + self.password \
                 + " --set servicePrincipalProfile.clientId=" + self.appid\
@@ -314,27 +342,44 @@ class AKSClusterInstaller:
     def set_kubeconfig(self):
         logging.debug("AKSClusterInstaller.set_kubeconfig")
         #command: export KUBECONFIG=/home/valerym/_output/cloud-shell-storage-westeurope/kubeconfig/kubeconfig.westeurope.json
-        kubeconfig_local_path = "_output/" + AZURE_STORAGE + "/kubeconfig/" + "kubeconfig." + AZURE_LOCATION + ".json"
+        kubeconfig_local_path = "_output/" + self.azure_storage + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
         command = "export KUBECONFIG=" + kubeconfig_local_path
         logging.debug("command: " + command)
         self.utils.run_command(command, "AKSClusterInstaller.set_kubeconfig")
 
     def create_namespace(self):
         logging.debug("AKSClusterInstaller.create_namespace")
-        command = "kubectl create namespace " + NAMESPACE
+        command = "kubectl create namespace " + self.namespace
         logging.debug("command: " + command)
         self.utils.run_command(command, "AKSClusterInstaller.set_kubeconfig")
 
     def install_ingress(self):
         logging.debug("AKSClusterInstaller.install_ingress")
-        self.ingress.add_ingress_nginx_to_helm_repo()
+        self.ingress.install_ingress()
+
+    def install_apps(self):
+        logging.debug("AKSClusterInstaller.install_ingress")
+        self.apps.install_apps()
+
+    def azure_account_list_refresh_and_wait(self):
+        logging.debug("AKSClusterInstaller.azure_account_list_refresh_and_wait")
+        wait_sec = 30
+        logging.info("Waiting " + str(wait_sec) + " sec ...")
+        for i in range(0,wait_sec):
+            time.sleep(1)
+            print("*",end="")
+        command = "az account list --refresh"
+        logging.debug("command: " + command)
+        self.utils.run_command(command, "AKSClusterInstaller.azure_account_list_refresh_and_wait")
 
 
 class IngressInstaller:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class IngressInstaller")
-        self.args = args
-        self.utils = Utils(self.args)
+        self.input_params = input_params
+        self.namespace = self.input_params.get('NAMESPACE')
+        self.ingress_controller_replica_count = self.input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT')
+        self.utils = Utils(self.input_params)
 
     def install_ingress(self):
         self.add_ingress_nginx_to_helm_repo()
@@ -348,62 +393,61 @@ class IngressInstaller:
     def install_ingress_controller(self):
         logging.debug("IngressInstaller.install_iingress_controller")
         command = "helm install nginx-ingress ingress-nginx/ingress-nginx \
-                  --namespace " + NAMESPACE \
-                  + " --set controller.replicaCount=" + INGRESS_CONTROLLER_REPLICACOUNT \
+                  --namespace " + self.namespace \
+                  + " --set controller.replicaCount=" + self.ingress_controller_replica_count \
                   + " --set controller.nodeSelector.\"beta\.kubernetes\.io/os\"=linux \
                   --set defaultBackend.nodeSelector.\"beta\.kubernetes\.io/os\"=linux"
         self.utils.run_command(command, "IngressInstaller.install_iingress_controller")
 
 
 class HelmInstaller:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class HelmInstaller")
-        self.args = args
-
-    def check_helm3_installation(self):
-        logging.debug("HelmInstaller.check_helm3_installation")
-        logging.info("Not implemented")
-        pass
+        self.input_params = input_params
+        self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
+        self.namespace = self.input_params.get('NAMESPACE')
 
     def install_helm3(self):
         logging.debug("HelmInstaller.install_helm3")
         try:
             command = "curl -L https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | sudo bash"
             logging.debug("Installing Helm3:" + command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen([command, self.azure_subscription], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
         except AssertionError:
             print(ERROR_RED + "HelmInstaller.install_helm3")
 
 
-class MicroservicesInstallerTest:
-    def __init__(self, args):
-        logging.debug("class MicroservicesInstallerTest")
-        self.args = args
+class AppsInstaller:
+    def __init__(self, input_params):
+        logging.debug("class AppsInstaller")
+        self.input_params = input_params
+        self.namespace = self.input_params.get('NAMESPACE')
+        self.utils = Utils(self.input_params)
 
-    def install_services_for_cluster_test(self):
-        logging.debug("MicroservicesInstallerTest.install_services_for_cluster_test")
+    def install_apps(self):
+        logging.debug("AppsInstaller.install_services_for_cluster_test")
         self.install_service_a()
         self.install_service_b()
 
     def install_service_a(self):
-        logging.debug("MicroservicesInstallerTest.install_service_a")
-        logging.info("Not implemented")
-        pass
+        logging.debug("AppsInstaller.install_service_a")
+        command = "kubectl apply -f service-a.yaml --namespace " + self.namespace
+        self.utils.run_command(command, "AppsInstaller.install_service_a")
 
     def install_service_b(self):
-        logging.debug("MicroservicesInstallerTest.install_service_b")
-        logging.info("Not implemented")
-        pass
+        logging.debug("AppsInstaller.install_service_b")
+        command = "kubectl apply -f service-b.yaml --namespace " + self.namespace
+        self.utils.run_command(command, "AppsInstaller.install_service_b")
+
 
 
 class Utils:
-    def __init__(self, args):
+    def __init__(self, input_params):
         logging.debug("class Utils")
-        self.args = args
-        # self.command = command
-        # self.class_function_name = class_function_name
+        self.input_params = input_params
+        self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
 
     def run_command(self,command, class_function_name ):
         logging.debug("Utils.run_command")
@@ -411,7 +455,7 @@ class Utils:
         try:
             command = str(command).strip()
             logging.debug(command)
-            proc = subprocess.Popen([command, self.args.subscription], stdout=subprocess.PIPE, shell=True)
+            proc = subprocess.Popen([command, self.azure_subscription], stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
         except AssertionError:
