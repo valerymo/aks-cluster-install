@@ -2,6 +2,7 @@
   "AZURE_SUBSCRIPTION_ID": "803fbfe1-411b-4055-aed5-a02de15bde2b",
   "NUMBER_OF_KUBERNETES_CLUSTER_NODES": "1",
   "NAMESPACE": "test4",
+  "LOCAL_TEST_INST": "no",
   "AZURE_STORAGE": "cloud-shell-storage-westeurope",
   "AZURE_LOCATION": "westeurope",
   "MAX_NODES_PER_CLUSTER": "100",

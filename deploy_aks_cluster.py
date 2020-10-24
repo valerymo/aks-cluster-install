@@ -12,14 +12,15 @@ import json
 import logging
 import subprocess
 import time
+import os
 
 ERROR_RED = "\033[1;31;40m" + "ERROR:" + "\033[0m"
 INFO_RED = "\033[1;31;40m" + "INFO:" + "\033[0m"
 INFO_BLUE = "\033[1;34;40m" + "INFO:" + "\033[0m"
 #31 - Red, 32 - Green, 33 - Yellow, 34 - Blue.
 
-logging.basicConfig(level=logging.INFO)  # for debugging use level=logging.DEBUG
-#logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.INFO)  # for debugging use level=logging.DEBUG
+logging.basicConfig(level=logging.DEBUG)
 
 def main():
     logging.debug("main")
@@ -45,7 +46,7 @@ def main():
 
         aks_cluster_installer = AKSClusterInstaller(input_params)
         aks_cluster_installer.install_cluster()
-        logging.debug("\033[1;32;40m" + "Completed:" + "\033[0m")
+        logging.info("\033[1;32;40m" + "Completed:" + "\033[0m")
 
     except AssertionError:
         print("ERROR: function main - Unexpected error")
@@ -54,6 +55,7 @@ def validate_params(input_params):
     if ((not input_params.get('AZURE_SUBSCRIPTION_ID'))
         or (not input_params.get('NUMBER_OF_KUBERNETES_CLUSTER_NODES'))
         or (not input_params.get('NAMESPACE'))
+        or (not input_params.get('LOCAL_TEST_INST'))
         or (not input_params.get('AZURE_STORAGE'))
         or (not input_params.get('AZURE_LOCATION'))
         or (not input_params.get('MAX_NODES_PER_CLUSTER'))
@@ -68,6 +70,7 @@ def validate_params(input_params):
             "  \"AZURE_SUBSCRIPTION_ID\": \"xxxxxx\",\n" +
             "  \"NUMBER_OF_KUBERNETES_CLUSTER_NODES\": \"1\",\n" +
             "  \"NAMESPACE\": \"test1\",\n" +
+            "  \"LOCAL_TEST_INST\": \"no\",\n" +
             "  \"AZURE_STORAGE\": \"cloud-shell-storage1-westeurope\",\n" +
             "  \"AZURE_LOCATION\": \"westeurope\",\n"+
             "  \"MAX_NODES_PER_CLUSTER\": \"100\",\n"+
@@ -282,6 +285,7 @@ class AKSClusterInstaller:
         self.azure_location = self.input_params.get('AZURE_LOCATION')
         self.kubernetes_json_file_name = self.input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME')
         self.namespace = self.input_params.get('NAMESPACE')
+        self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
 
         self.ingress = IngressInstaller(self.input_params)
         self.apps = AppsInstaller(self.input_params)
@@ -296,7 +300,7 @@ class AKSClusterInstaller:
         self.create_role("Contributor")
         self.azure_account_list_refresh_and_wait()
         self.deploy_cluster()
-        self.set_kubeconfig()
+        #self.set_kubeconfig()
         self.create_namespace()
         self.install_ingress()
         self.install_apps()
@@ -339,35 +343,39 @@ class AKSClusterInstaller:
         logging.debug("command: " + command)
         self.utils.run_command(command, "AKSClusterInstaller.deploy_cluster")
 
-    def set_kubeconfig(self):
-        logging.debug("AKSClusterInstaller.set_kubeconfig")
-        #command: export KUBECONFIG=/home/valerym/_output/cloud-shell-storage-westeurope/kubeconfig/kubeconfig.westeurope.json
-        kubeconfig_local_path = "_output/" + self.azure_storage + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
-        command = "export KUBECONFIG=" + kubeconfig_local_path
-        logging.debug("command: " + command)
-        self.utils.run_command(command, "AKSClusterInstaller.set_kubeconfig")
+    # def set_kubeconfig(self):
+    #     logging.debug("AKSClusterInstaller.set_kubeconfig")
+    #     #command: export KUBECONFIG=...../_output/cloud-shell-storage-westeurope/kubeconfig/kubeconfig.westeurope.json
+    #     kubeconfig_local_path = "_output/" + self.azure_storage + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
+    #     command = "export KUBECONFIG=" + kubeconfig_local_path
+    #     logging.debug("command: " + command)
+    #     self.utils.run_command(command, "AKSClusterInstaller.set_kubeconfig")
 
     def create_namespace(self):
         logging.debug("AKSClusterInstaller.create_namespace")
         command = "kubectl create namespace " + self.namespace
         logging.debug("command: " + command)
-        self.utils.run_command(command, "AKSClusterInstaller.set_kubeconfig")
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "AKSClusterInstaller.create_namespace")
+        else:
+            self.utils.run_command_in_azure_env(command, "AKSClusterInstaller.create_namespace")
 
     def install_ingress(self):
         logging.debug("AKSClusterInstaller.install_ingress")
         self.ingress.install_ingress()
 
     def install_apps(self):
-        logging.debug("AKSClusterInstaller.install_ingress")
+        logging.debug("AKSClusterInstaller.install_apps")
         self.apps.install_apps()
 
     def azure_account_list_refresh_and_wait(self):
         logging.debug("AKSClusterInstaller.azure_account_list_refresh_and_wait")
         wait_sec = 30
         logging.info("Waiting " + str(wait_sec) + " sec ...")
-        for i in range(0,wait_sec):
+        for i in range(wait_sec):
+            print("*",flush=True,end="")
             time.sleep(1)
-            print("*",end="")
+        print()
         command = "az account list --refresh"
         logging.debug("command: " + command)
         self.utils.run_command(command, "AKSClusterInstaller.azure_account_list_refresh_and_wait")
@@ -379,11 +387,15 @@ class IngressInstaller:
         self.input_params = input_params
         self.namespace = self.input_params.get('NAMESPACE')
         self.ingress_controller_replica_count = self.input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT')
+        self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
         self.utils = Utils(self.input_params)
 
     def install_ingress(self):
         self.add_ingress_nginx_to_helm_repo()
         self.install_ingress_controller()
+        time.sleep(20)
+        self.install_ingress_resource()
+        self.install_network_policy()
 
     def add_ingress_nginx_to_helm_repo(self):
         logging.debug("IngressInstaller.add_ingress_nginx")
@@ -397,7 +409,26 @@ class IngressInstaller:
                   + " --set controller.replicaCount=" + self.ingress_controller_replica_count \
                   + " --set controller.nodeSelector.\"beta\.kubernetes\.io/os\"=linux \
                   --set defaultBackend.nodeSelector.\"beta\.kubernetes\.io/os\"=linux"
-        self.utils.run_command(command, "IngressInstaller.install_iingress_controller")
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "IngressInstaller.install_ingress_controller")
+        else:
+            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_controller")
+
+    def install_ingress_resource(self):
+        logging.debug("AppsInstaller.install_ingress_resource")
+        command = "kubectl apply -f services-ingress.yaml --namespace " + self.namespace
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "IngressInstaller.install_ingress_resource")
+        else:
+            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_resource")
+
+    def install_network_policy(self):
+        logging.debug("AppsInstaller.install_network_policy")
+        command = "kubectl apply -f network_policy.yml --namespace " + self.namespace
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "IngressInstaller.install_network_policy")
+        else:
+            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_network_policy")
 
 
 class HelmInstaller:
@@ -424,6 +455,7 @@ class AppsInstaller:
         logging.debug("class AppsInstaller")
         self.input_params = input_params
         self.namespace = self.input_params.get('NAMESPACE')
+        self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
         self.utils = Utils(self.input_params)
 
     def install_apps(self):
@@ -434,13 +466,18 @@ class AppsInstaller:
     def install_service_a(self):
         logging.debug("AppsInstaller.install_service_a")
         command = "kubectl apply -f service-a.yaml --namespace " + self.namespace
-        self.utils.run_command(command, "AppsInstaller.install_service_a")
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "AppsInstaller.install_service_a")
+        else:
+            self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_a")
 
     def install_service_b(self):
         logging.debug("AppsInstaller.install_service_b")
         command = "kubectl apply -f service-b.yaml --namespace " + self.namespace
-        self.utils.run_command(command, "AppsInstaller.install_service_b")
-
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "AppsInstaller.install_service_b")
+        else:
+            self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_b")
 
 
 class Utils:
@@ -448,6 +485,8 @@ class Utils:
         logging.debug("class Utils")
         self.input_params = input_params
         self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
+        self.azure_storage = self.input_params.get('AZURE_STORAGE')
+        self.azure_location = self.input_params.get('AZURE_LOCATION')
 
     def run_command(self,command, class_function_name ):
         logging.debug("Utils.run_command")
@@ -456,6 +495,20 @@ class Utils:
             command = str(command).strip()
             logging.debug(command)
             proc = subprocess.Popen([command, self.azure_subscription], stdout=subprocess.PIPE, shell=True)
+            (out, err) = proc.communicate()
+            print("Out: " + str(out))
+        except AssertionError:
+            print(ERROR_RED + class_function_name + "Unexpected error")
+
+    def run_command_in_azure_env(self,command, class_function_name ):
+        logging.debug("Utils.run_command_in_azure_env")
+        logging.debug("Run command for: " + class_function_name)
+        try:
+            my_env = os.environ.copy()
+            my_env["KUBECONFIG"] = "_output/" + self.azure_storage + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
+            command = str(command).strip()
+            logging.debug(command)
+            proc = subprocess.Popen([command, self.azure_subscription], env=my_env, stdout=subprocess.PIPE, shell=True)
             (out, err) = proc.communicate()
             print("Out: " + str(out))
         except AssertionError:
