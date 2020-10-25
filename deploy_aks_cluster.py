@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-# version: 0.2.0
-# date: 21.10.20
+# version: 0.2.1
+# date: 25.10.20
 # developed by: Valery Mogilevsky
 # description: Script for AKS (Kubernetes) Cluster deployment
 # Required input parameters: -f input.json - json file with parameters definitions
@@ -55,23 +55,23 @@ def validate_params(input_params):
     if ((not input_params.get('AZURE_SUBSCRIPTION_ID'))
         or (not input_params.get('NUMBER_OF_KUBERNETES_CLUSTER_NODES'))
         or (not input_params.get('NAMESPACE'))
+        or (not input_params.get('RBAC_ROLE'))
         or (not input_params.get('LOCAL_TEST_INST'))
-        or (not input_params.get('AZURE_STORAGE'))
+        or (not input_params.get('RESOURCE_GROUP'))
         or (not input_params.get('AZURE_LOCATION'))
         or (not input_params.get('MAX_NODES_PER_CLUSTER'))
         or (not input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT'))
         or (not input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME'))
-        or (not input_params.get('APP_DEPLOY_YAML_FILES_FOR_TEST'))
-        or (not input_params.get('AZURE_STORAGE'))
-        or (not input_params.get('AZURE_LOCATION'))):
+        or (not input_params.get('APP_DEPLOY_YAML_FILES_FOR_TEST'))):
         print ("Missing mandatory parameter in input file")
         print ("Expected json input file structure sample: ")
         print ("{\n" +
             "  \"AZURE_SUBSCRIPTION_ID\": \"xxxxxx\",\n" +
             "  \"NUMBER_OF_KUBERNETES_CLUSTER_NODES\": \"1\",\n" +
             "  \"NAMESPACE\": \"test1\",\n" +
+            "  \"RBAC_ROLE\": \"Contributor\",\n" +
             "  \"LOCAL_TEST_INST\": \"no\",\n" +
-            "  \"AZURE_STORAGE\": \"cloud-shell-storage1-westeurope\",\n" +
+            "  \"RESOURCE_GROUP\": \"cloud-shell-storage1-westeurope\",\n" +
             "  \"AZURE_LOCATION\": \"westeurope\",\n"+
             "  \"MAX_NODES_PER_CLUSTER\": \"100\",\n"+
             "  \"INGRESS_CONTROLLER_REPLICA_COUNT\": \"2\",\n"+
@@ -281,11 +281,13 @@ class AKSClusterInstaller:
         logging.debug("class AKSClusterInstaller")
         self.input_params = input_params
         self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
-        self.azure_storage = self.input_params.get('AZURE_STORAGE')
+        self.resource_group = self.input_params.get('RESOURCE_GROUP')
         self.azure_location = self.input_params.get('AZURE_LOCATION')
         self.kubernetes_json_file_name = self.input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME')
         self.namespace = self.input_params.get('NAMESPACE')
         self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
+        self.role = self.input_params.get('RBAC_ROLE')
+
 
         self.ingress = IngressInstaller(self.input_params)
         self.apps = AppsInstaller(self.input_params)
@@ -297,7 +299,7 @@ class AKSClusterInstaller:
         logging.debug("AKSClusterInstaller.install_cluster")
         logging.debug("Installing Cluster ...")
         self.create_group()
-        self.create_role("Contributor")
+        self.create_role(self.role)
         self.azure_account_list_refresh_and_wait()
         self.deploy_cluster()
         #self.set_kubeconfig()
@@ -307,14 +309,14 @@ class AKSClusterInstaller:
 
     def create_group(self):
         logging.debug("AKSClusterInstaller.create_group")
-        command = "az group create --name " + self.azure_storage + " --location " + self.azure_location
+        command = "az group create --name " + self.resource_group + " --location " + self.azure_location
         logging.debug("command:" + command)
         self.utils.run_command(command, "AKSClusterInstaller.create_group")
 
     def create_role(self, role):
         logging.debug("AKSClusterInstaller.create_role")
         #command = az ad sp create-for-rbac --role="Contributor" --scopes="/subscriptions/803fbfe1-411b-4055-aed5-a02de15bde2b/resourceGroups/cloud-shell-storage-westeurope"
-        command = "az ad sp create-for-rbac --role=\"" + role + "\" --scopes=\"/subscriptions/" + self.azure_subscription + "/resourceGroups/" + self.azure_storage + "\""
+        command = "az ad sp create-for-rbac --role=\"" + role + "\" --scopes=\"/subscriptions/" + self.azure_subscription + "/resourceGroups/" + self.resource_group + "\""
         try:
             logging.debug(command)
             proc = subprocess.Popen([command, self.azure_subscription], stdout=subprocess.PIPE, shell=True)
@@ -332,8 +334,8 @@ class AKSClusterInstaller:
         logging.debug("AKSClusterInstaller.deploy_cluster")
         #command = aks-engine deploy --subscription-id 803fbfe1-411b-4055-aed5-a02de15bde2b     --dns-prefix cloud-shell-storage-westeurope     --resource-group cloud-shell-storage-westeurope     --location westeurope     --api-model kubernetes.json     --client-id 630c39b3-70ff-476f-a699-195b9591ff8d     --client-secret 8ZsTAh7.aueCNRN_v5Gr7r8RNdlZWzoTZB     --set servicePrincipalProfile.clientId="630c39b3-70ff-476f-a699-195b9591ff8d"     --set servicePrincipalProfile.secret="630c39b3-70ff-476f-a699-195b9591ff8d"
         command = "aks-engine deploy --subscription-id " + self.azure_subscription \
-                + " --dns-prefix " + self.azure_storage \
-                + " --resource-group " + self.azure_storage \
+                + " --dns-prefix " + self.resource_group \
+                + " --resource-group " + self.resource_group \
                 + " --location " +  self.azure_location  \
                 + " --api-model " + self.kubernetes_json_file_name \
                 + " --client-id " + self.appid \
@@ -346,7 +348,7 @@ class AKSClusterInstaller:
     # def set_kubeconfig(self):
     #     logging.debug("AKSClusterInstaller.set_kubeconfig")
     #     #command: export KUBECONFIG=...../_output/cloud-shell-storage-westeurope/kubeconfig/kubeconfig.westeurope.json
-    #     kubeconfig_local_path = "_output/" + self.azure_storage + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
+    #     kubeconfig_local_path = "_output/" + self.resource_group + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
     #     command = "export KUBECONFIG=" + kubeconfig_local_path
     #     logging.debug("command: " + command)
     #     self.utils.run_command(command, "AKSClusterInstaller.set_kubeconfig")
@@ -393,9 +395,6 @@ class IngressInstaller:
     def install_ingress(self):
         self.add_ingress_nginx_to_helm_repo()
         self.install_ingress_controller()
-        time.sleep(20)
-        self.install_ingress_resource()
-        self.install_network_policy()
 
     def add_ingress_nginx_to_helm_repo(self):
         logging.debug("IngressInstaller.add_ingress_nginx")
@@ -413,22 +412,6 @@ class IngressInstaller:
             self.utils.run_command(command, "IngressInstaller.install_ingress_controller")
         else:
             self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_controller")
-
-    def install_ingress_resource(self):
-        logging.debug("AppsInstaller.install_ingress_resource")
-        command = "kubectl apply -f services-ingress.yaml --namespace " + self.namespace
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "IngressInstaller.install_ingress_resource")
-        else:
-            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_resource")
-
-    def install_network_policy(self):
-        logging.debug("AppsInstaller.install_network_policy")
-        command = "kubectl apply -f network_policy.yml --namespace " + self.namespace
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "IngressInstaller.install_network_policy")
-        else:
-            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_network_policy")
 
 
 class HelmInstaller:
@@ -462,6 +445,8 @@ class AppsInstaller:
         logging.debug("AppsInstaller.install_services_for_cluster_test")
         self.install_service_a()
         self.install_service_b()
+        self.install_ingress_resource()
+        self.install_network_policy()
 
     def install_service_a(self):
         logging.debug("AppsInstaller.install_service_a")
@@ -479,13 +464,29 @@ class AppsInstaller:
         else:
             self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_b")
 
+    def install_ingress_resource(self):
+        logging.debug("AppsInstaller.install_ingress_resource")
+        command = "kubectl apply -f services-ingress.yaml --namespace " + self.namespace
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "IngressInstaller.install_ingress_resource")
+        else:
+            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_resource")
+
+    def install_network_policy(self):
+        logging.debug("IngressInstaller.install_network_policy")
+        command = "kubectl apply -f network_policy.yml --namespace " + self.namespace
+        if self.local_test_inst.lower() ==  "yes" :
+            self.utils.run_command(command, "IngressInstaller.install_network_policy")
+        else:
+            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_network_policy")
+
 
 class Utils:
     def __init__(self, input_params):
         logging.debug("class Utils")
         self.input_params = input_params
         self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
-        self.azure_storage = self.input_params.get('AZURE_STORAGE')
+        self.resource_group = self.input_params.get('RESOURCE_GROUP')
         self.azure_location = self.input_params.get('AZURE_LOCATION')
 
     def run_command(self,command, class_function_name ):
@@ -505,7 +506,7 @@ class Utils:
         logging.debug("Run command for: " + class_function_name)
         try:
             my_env = os.environ.copy()
-            my_env["KUBECONFIG"] = "_output/" + self.azure_storage + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
+            my_env["KUBECONFIG"] = "_output/" + self.resource_group + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
             command = str(command).strip()
             logging.debug(command)
             proc = subprocess.Popen([command, self.azure_subscription], env=my_env, stdout=subprocess.PIPE, shell=True)
