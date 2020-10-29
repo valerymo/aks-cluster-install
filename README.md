@@ -33,17 +33,19 @@ optional arguments:
 
 Example for input.json file:
 {
-  "AZURE_SUBSCRIPTION_ID": "xxxx-xxx-xxx-xxx-xxxxxx",
+  "AZURE_SUBSCRIPTION_ID": "xxxxxx-xxxx-xxxx-xxxx-xxxxxx",
   "NUMBER_OF_KUBERNETES_CLUSTER_NODES": "1",
   "NAMESPACE": "test4",
-  "AZURE_STORAGE": "cloud-shell-storage-westeurope",
+  "RBAC_ROLE":"Owner",
+  "LOCAL_TEST_INST": "no",
+  "RESOURCE_GROUP": "cloud-shell-storage-westeurope",
   "AZURE_LOCATION": "westeurope",
   "MAX_NODES_PER_CLUSTER": "100",
   "INGRESS_CONTROLLER_REPLICA_COUNT": "2",
   "API_MODEL_KUBERNETES_JSON_FILE_NAME": "kubernetes.json",
   "APP_HELM_CHARTS_FOR_TEST":[
-         { "service-a":"service-a.yaml"},
-         { "service-b":"service-b.yaml"}]
+         { "service-a":"service-a-0.2.0.tgz"},
+         { "service-b":"service-b-0.2.0.tgz"}]
 }
 
 ------------------
