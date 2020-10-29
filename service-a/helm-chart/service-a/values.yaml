@@ -1,0 +1,48 @@
+# Default values for service-a.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+replicaCount: 1
+image:
+  repository: valerym1/service-a
+  tag: 0.1.3
+  pullPolicy: IfNotPresent
+service:
+  name: service-a
+  type: NodePort
+  externalPort: 8080
+  internalPort: 8080
+  readinessProbe:
+    initialDelaySeconds: 5
+    timeoutSeconds: 1
+    periodSeconds: 10
+    failureThreshold: 3
+    successThreshold: 1
+  livenessProbe:
+    initialDelaySeconds: 15
+    timeoutSeconds: 1
+    periodSeconds:  20
+    failureThreshold: 3
+    successThreshold: 1
+
+ingress:
+  enabled: true
+  # Used to create an Ingress record.
+  # hosts:
+  #   - chart-example.local
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # kubernetes.io/tls-acme: "true"
+  tls:
+    # Secrets must be manually created in the namespace.
+    # - secretName: chart-example-tls
+    #   hosts:
+    #     - chart-example.local
+resources: {}
+  # limits:
+  #  cpu: 100m
+  #  memory: 128Mi
+  # requests:
+  #  cpu: 100m
+  #  memory: 128Mi

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "service-a.fullname" . }}
+  labels:
+    app: {{ template "service-a.name" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "service-a.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "service-a.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.internalPort }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.service.internalPort }}
+            initialDelaySeconds:  {{ .Values.service.livenessProbe.initialDelaySeconds }}
+            timeoutSeconds: {{ .Values.service.livenessProbe.timeoutSeconds }}
+            periodSeconds: {{ .Values.service.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.service.livenessProbe.failureThreshold }}
+            successThreshold: {{ .Values.service.livenessProbe.successThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.service.internalPort }}
+            initialDelaySeconds: {{ .Values.service.readinessProbe.initialDelaySeconds }}
+            timeoutSeconds: {{ .Values.service.readinessProbe.timeoutSeconds }}
+            periodSeconds: {{ .Values.service.readinessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.service.readinessProbe.failureThreshold }}
+            successThreshold: {{ .Values.service.readinessProbe.successThreshold }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+    {{- if .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}
+    {{- end }}

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# version: 0.2.1
+# version: 0.2.2
 # date: 25.10.20
 # developed by: Valery Mogilevsky
 # description: Script for AKS (Kubernetes) Cluster deployment
@@ -62,7 +62,7 @@ def validate_params(input_params):
         or (not input_params.get('MAX_NODES_PER_CLUSTER'))
         or (not input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT'))
         or (not input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME'))
-        or (not input_params.get('APP_DEPLOY_YAML_FILES_FOR_TEST'))):
+        or (not input_params.get('APP_HELM_CHARTS_FOR_TEST'))):
         print ("Missing mandatory parameter in input file")
         print ("Expected json input file structure sample: ")
         print ("{\n" +
@@ -76,9 +76,9 @@ def validate_params(input_params):
             "  \"MAX_NODES_PER_CLUSTER\": \"100\",\n"+
             "  \"INGRESS_CONTROLLER_REPLICA_COUNT\": \"2\",\n"+
             "  \"API_MODEL_KUBERNETES_JSON_FILE_NAME\": \"kubernetes.json\",\n"+
-            "  \"APP_DEPLOY_YAML_FILES_FOR_TEST\": [\n"+
-            "    {\"service-a\": \"service-a.yaml\"},\n"+
-            "    {\"service-b\": \"service-b.yaml\"}]\n"+
+            "  \"APP_HELM_CHARTS_FOR_TEST\": [\n"+
+            "    {\"service-a\": \"service-a-0.2.0.tgz\"},\n"+
+            "    {\"service-b\": \"service-b-0.2.0.tgz\"}]\n"+
        "}\n")
         return False
     else:
@@ -439,18 +439,19 @@ class AppsInstaller:
         self.input_params = input_params
         self.namespace = self.input_params.get('NAMESPACE')
         self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
+        self.service_a_helmchart = self.input_params.get('APP_HELM_CHARTS_FOR_TEST')[0].get('service-a')
+        self.service_b_helmchart = self.input_params.get('APP_HELM_CHARTS_FOR_TEST')[1].get('service-b')
         self.utils = Utils(self.input_params)
 
     def install_apps(self):
         logging.debug("AppsInstaller.install_services_for_cluster_test")
         self.install_service_a()
         self.install_service_b()
-        self.install_ingress_resource()
         self.install_network_policy()
 
     def install_service_a(self):
         logging.debug("AppsInstaller.install_service_a")
-        command = "kubectl apply -f service-a.yaml --namespace " + self.namespace
+        command = "helm install service-a " + self.service_a_helmchart + " --namespace " + self.namespace
         if self.local_test_inst.lower() ==  "yes" :
             self.utils.run_command(command, "AppsInstaller.install_service_a")
         else:
@@ -458,19 +459,11 @@ class AppsInstaller:
 
     def install_service_b(self):
         logging.debug("AppsInstaller.install_service_b")
-        command = "kubectl apply -f service-b.yaml --namespace " + self.namespace
+        command = "helm install service-b " + self.service_b_helmchart + " --namespace " + self.namespace
         if self.local_test_inst.lower() ==  "yes" :
             self.utils.run_command(command, "AppsInstaller.install_service_b")
         else:
             self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_b")
-
-    def install_ingress_resource(self):
-        logging.debug("AppsInstaller.install_ingress_resource")
-        command = "kubectl apply -f services-ingress.yaml --namespace " + self.namespace
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "IngressInstaller.install_ingress_resource")
-        else:
-            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_resource")
 
     def install_network_policy(self):
         logging.debug("IngressInstaller.install_network_policy")

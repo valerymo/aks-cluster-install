@@ -41,7 +41,7 @@ Example for input.json file:
   "MAX_NODES_PER_CLUSTER": "100",
   "INGRESS_CONTROLLER_REPLICA_COUNT": "2",
   "API_MODEL_KUBERNETES_JSON_FILE_NAME": "kubernetes.json",
-  "APP_DEPLOY_YAML_FILES_FOR_TEST":[
+  "APP_HELM_CHARTS_FOR_TEST":[
          { "service-a":"service-a.yaml"},
          { "service-b":"service-b.yaml"}]
 }
