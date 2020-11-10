@@ -7,21 +7,21 @@
     "masterProfile": {
       "count": 1,
       "dnsPrefix": "",
-      "vmSize": "Standard_D2_v3"
+      "vmSize": "Standard_B2s"
     },
     "agentPoolProfiles": [
       {
         "name": "agentpool1",
         "count": 1,
-        "vmSize": "Standard_D2_v3"
+        "vmSize": "Standard_B2s"
       }
     ],
     "linuxProfile": {
-      "adminUsername": "azureuser",
+      "adminUsername": "valerym",
       "ssh": {
         "publicKeys": [
           {
-            "keyData": ""
+            "keyData": "ssh-rsa xxxxxxxx"
           }
         ]
       }

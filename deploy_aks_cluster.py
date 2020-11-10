@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-# version: 0.2.2
-# date: 25.10.20
+# version: 0.2.3
+# date: 10.11.20
 # developed by: Valery Mogilevsky
 # description: Script for AKS (Kubernetes) Cluster deployment
 # Required input parameters: -f input.json - json file with parameters definitions
@@ -56,8 +56,8 @@ def validate_params(input_params):
         or (not input_params.get('NUMBER_OF_KUBERNETES_CLUSTER_NODES'))
         or (not input_params.get('NAMESPACE'))
         or (not input_params.get('RBAC_ROLE'))
-        or (not input_params.get('LOCAL_TEST_INST'))
         or (not input_params.get('RESOURCE_GROUP'))
+        or (not input_params.get('DNS_PREFIX'))
         or (not input_params.get('AZURE_LOCATION'))
         or (not input_params.get('MAX_NODES_PER_CLUSTER'))
         or (not input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT'))
@@ -70,8 +70,8 @@ def validate_params(input_params):
             "  \"NUMBER_OF_KUBERNETES_CLUSTER_NODES\": \"1\",\n" +
             "  \"NAMESPACE\": \"test1\",\n" +
             "  \"RBAC_ROLE\": \"Contributor\",\n" +
-            "  \"LOCAL_TEST_INST\": \"no\",\n" +
-            "  \"RESOURCE_GROUP\": \"cloud-shell-storage1-westeurope\",\n" +
+            "  \"RESOURCE_GROUP\": \"my_group\",\n" +
+            "  \"DNS_PREFIX\": \"my-group\",\n" +
             "  \"AZURE_LOCATION\": \"westeurope\",\n"+
             "  \"MAX_NODES_PER_CLUSTER\": \"100\",\n"+
             "  \"INGRESS_CONTROLLER_REPLICA_COUNT\": \"2\",\n"+
@@ -282,12 +282,11 @@ class AKSClusterInstaller:
         self.input_params = input_params
         self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
         self.resource_group = self.input_params.get('RESOURCE_GROUP')
+        self.dns_prefix = self.input_params.get('DNS_PREFIX')
         self.azure_location = self.input_params.get('AZURE_LOCATION')
         self.kubernetes_json_file_name = self.input_params.get('API_MODEL_KUBERNETES_JSON_FILE_NAME')
         self.namespace = self.input_params.get('NAMESPACE')
-        self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
         self.role = self.input_params.get('RBAC_ROLE')
-
 
         self.ingress = IngressInstaller(self.input_params)
         self.apps = AppsInstaller(self.input_params)
@@ -302,7 +301,6 @@ class AKSClusterInstaller:
         self.create_role(self.role)
         self.azure_account_list_refresh_and_wait()
         self.deploy_cluster()
-        #self.set_kubeconfig()
         self.create_namespace()
         self.install_ingress()
         self.install_apps()
@@ -334,14 +332,14 @@ class AKSClusterInstaller:
         logging.debug("AKSClusterInstaller.deploy_cluster")
         #command = aks-engine deploy --subscription-id 803fbfe1-411b-4055-aed5-a02de15bde2b     --dns-prefix cloud-shell-storage-westeurope     --resource-group cloud-shell-storage-westeurope     --location westeurope     --api-model kubernetes.json     --client-id 630c39b3-70ff-476f-a699-195b9591ff8d     --client-secret 8ZsTAh7.aueCNRN_v5Gr7r8RNdlZWzoTZB     --set servicePrincipalProfile.clientId="630c39b3-70ff-476f-a699-195b9591ff8d"     --set servicePrincipalProfile.secret="630c39b3-70ff-476f-a699-195b9591ff8d"
         command = "aks-engine deploy --subscription-id " + self.azure_subscription \
-                + " --dns-prefix " + self.resource_group \
+                + " --dns-prefix " + self.dns_prefix \
                 + " --resource-group " + self.resource_group \
                 + " --location " +  self.azure_location  \
                 + " --api-model " + self.kubernetes_json_file_name \
                 + " --client-id " + self.appid \
                 + " --client-secret " + self.password \
                 + " --set servicePrincipalProfile.clientId=" + self.appid\
-                + " --set servicePrincipalProfile.secret=" + self.appid
+                + " --set servicePrincipalProfile.secret=" + self.password
         logging.debug("command: " + command)
         self.utils.run_command(command, "AKSClusterInstaller.deploy_cluster")
 
@@ -357,10 +355,7 @@ class AKSClusterInstaller:
         logging.debug("AKSClusterInstaller.create_namespace")
         command = "kubectl create namespace " + self.namespace
         logging.debug("command: " + command)
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "AKSClusterInstaller.create_namespace")
-        else:
-            self.utils.run_command_in_azure_env(command, "AKSClusterInstaller.create_namespace")
+        self.utils.run_command_in_azure_env(command, "AKSClusterInstaller.create_namespace")
 
     def install_ingress(self):
         logging.debug("AKSClusterInstaller.install_ingress")
@@ -372,12 +367,7 @@ class AKSClusterInstaller:
 
     def azure_account_list_refresh_and_wait(self):
         logging.debug("AKSClusterInstaller.azure_account_list_refresh_and_wait")
-        wait_sec = 30
-        logging.info("Waiting " + str(wait_sec) + " sec ...")
-        for i in range(wait_sec):
-            print("*",flush=True,end="")
-            time.sleep(1)
-        print()
+        self.utils.wait_sec(30)
         command = "az account list --refresh"
         logging.debug("command: " + command)
         self.utils.run_command(command, "AKSClusterInstaller.azure_account_list_refresh_and_wait")
@@ -389,7 +379,6 @@ class IngressInstaller:
         self.input_params = input_params
         self.namespace = self.input_params.get('NAMESPACE')
         self.ingress_controller_replica_count = self.input_params.get('INGRESS_CONTROLLER_REPLICA_COUNT')
-        self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
         self.utils = Utils(self.input_params)
 
     def install_ingress(self):
@@ -408,10 +397,7 @@ class IngressInstaller:
                   + " --set controller.replicaCount=" + self.ingress_controller_replica_count \
                   + " --set controller.nodeSelector.\"beta\.kubernetes\.io/os\"=linux \
                   --set defaultBackend.nodeSelector.\"beta\.kubernetes\.io/os\"=linux"
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "IngressInstaller.install_ingress_controller")
-        else:
-            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_controller")
+        self.utils.run_command_in_azure_env(command, "IngressInstaller.install_ingress_controller")
 
 
 class HelmInstaller:
@@ -438,13 +424,13 @@ class AppsInstaller:
         logging.debug("class AppsInstaller")
         self.input_params = input_params
         self.namespace = self.input_params.get('NAMESPACE')
-        self.local_test_inst = self.input_params.get('LOCAL_TEST_INST')
         self.service_a_helmchart = self.input_params.get('APP_HELM_CHARTS_FOR_TEST')[0].get('service-a')
         self.service_b_helmchart = self.input_params.get('APP_HELM_CHARTS_FOR_TEST')[1].get('service-b')
         self.utils = Utils(self.input_params)
 
     def install_apps(self):
         logging.debug("AppsInstaller.install_services_for_cluster_test")
+        self.utils.wait_sec(20)
         self.install_service_a()
         self.install_service_b()
         self.install_network_policy()
@@ -452,26 +438,17 @@ class AppsInstaller:
     def install_service_a(self):
         logging.debug("AppsInstaller.install_service_a")
         command = "helm install service-a " + self.service_a_helmchart + " --namespace " + self.namespace
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "AppsInstaller.install_service_a")
-        else:
-            self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_a")
+        self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_a")
 
     def install_service_b(self):
         logging.debug("AppsInstaller.install_service_b")
         command = "helm install service-b " + self.service_b_helmchart + " --namespace " + self.namespace
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "AppsInstaller.install_service_b")
-        else:
-            self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_b")
+        self.utils.run_command_in_azure_env(command, "AppsInstaller.install_service_b")
 
     def install_network_policy(self):
         logging.debug("IngressInstaller.install_network_policy")
         command = "kubectl apply -f network_policy.yml --namespace " + self.namespace
-        if self.local_test_inst.lower() ==  "yes" :
-            self.utils.run_command(command, "IngressInstaller.install_network_policy")
-        else:
-            self.utils.run_command_in_azure_env(command, "IngressInstaller.install_network_policy")
+        self.utils.run_command_in_azure_env(command, "IngressInstaller.install_network_policy")
 
 
 class Utils:
@@ -479,7 +456,7 @@ class Utils:
         logging.debug("class Utils")
         self.input_params = input_params
         self.azure_subscription = self.input_params.get('AZURE_SUBSCRIPTION_ID')
-        self.resource_group = self.input_params.get('RESOURCE_GROUP')
+        self.dns_prefix = self.input_params.get('DNS_PREFIX')
         self.azure_location = self.input_params.get('AZURE_LOCATION')
 
     def run_command(self,command, class_function_name ):
@@ -499,7 +476,7 @@ class Utils:
         logging.debug("Run command for: " + class_function_name)
         try:
             my_env = os.environ.copy()
-            my_env["KUBECONFIG"] = "_output/" + self.resource_group + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
+            my_env["KUBECONFIG"] = "_output/" + self.dns_prefix + "/kubeconfig/" + "kubeconfig." + self.azure_location + ".json"
             command = str(command).strip()
             logging.debug(command)
             proc = subprocess.Popen([command, self.azure_subscription], env=my_env, stdout=subprocess.PIPE, shell=True)
@@ -507,6 +484,14 @@ class Utils:
             print("Out: " + str(out))
         except AssertionError:
             print(ERROR_RED + class_function_name + "Unexpected error")
+
+    def wait_sec(self, sec):
+        logging.debug("Utils.wait_sec")
+        logging.info("Waiting " + str(sec) + " sec ...")
+        for i in range(sec):
+            print("*",flush=True,end="")
+            time.sleep(1)
+        print()
 
 
 if __name__ == "__main__":
